@@ -1,0 +1,167 @@
+System Design
+
+Phase 1 + Phase 2 — User journeys, dashboard, states, threats and demo
+
+AgentVault | W3-02 | CodoSolo | Sanidhya Gupta
+
+Status: Proposed specification; not a claim that features are already implemented or audited.
+
+1. Design Principles
+
+Least privilege for agent keys.
+
+Enforce policy at smart-account authorization boundary.
+
+Fail closed on unknown or malformed authorization.
+
+Make every allow/reject/freeze/recovery decision explainable.
+
+Provide recovery after compromise.
+
+Label mockups and unimplemented features honestly.
+
+2. System Context
+
+3. User Journeys
+
+A. Configure and use safe agent
+
+Owner configures caps, recipients, targets/selectors and expiry.
+
+Agent submits a transaction request.
+
+Smart account validates all policy conditions.
+
+Valid operation proceeds; invalid operation is rejected or sent through a specifically implemented approval flow.
+
+Dashboard shows amount, target, status and reason.
+
+B. Detect and freeze compromise
+
+Agent produces repeated suspicious or policy-violating requests.
+
+Rule-based detector crosses configured threshold.
+
+Authorized freeze mechanism changes status to FROZEN.
+
+Subsequent agent operations fail validation.
+
+Owner sees alert and may investigate or revoke.
+
+C. Guardian recovery
+
+Recovery request is opened.
+
+Three distinct approvals are collected from five guardians.
+
+48-hour delay begins after threshold is reached (proposed rule).
+
+Owner may veto during the defined window.
+
+If not vetoed, scoped recovery executes and old agent authority is revoked/rotated.
+
+D. Gas sponsorship
+
+Agent requests sponsored operation.
+
+Paymaster validates operation and agent status.
+
+Quota accounting checks remaining allowance.
+
+Sponsor pays only if policy allows; otherwise request is rejected with reason.
+
+4. Dashboard Information Architecture
+
+
+| Screen | Contents | States |
+| --- | --- | --- |
+| Overview | Policy status, spent today, daily limit, expiry, pending approvals | Active/Frozen/Revoked/Expired |
+| Policy | Caps, recipients, targets/selectors, expiry, anomaly threshold, quota | Saved/invalid/pending signature |
+| Activity | Amount, destination, status, timestamp, reason | Allowed/Blocked/Needs approval |
+| Security alerts | Repeated rejects, rate anomalies, freeze reason | New/Acknowledged/Resolved |
+| Recovery | Guardian approvals, countdown, veto, execute | Pending/Delay/Vetoed/Ready/Complete |
+| Sponsorship | Quota usage and remaining allowance | Available/Exhausted/Disabled |
+
+
+5. State Model
+
+
+| State | Meaning | Agent operation allowed? | Transition |
+| --- | --- | --- | --- |
+| ACTIVE | Policy and key valid | Only if all checks pass | Owner provisions/configures. |
+| FROZEN | Containment state | No | Owner or authorized detector freezes. |
+| REVOKED | Key permanently disabled | No | Owner revokes or recovery completes. |
+| EXPIRED | Permission lifetime ended | No | Time/validation check. |
+| RECOVERY_PENDING | Threshold/delay in progress | No risky agent operations | Recovery request and approvals. |
+| RECOVERED | Owner control restored | Old agent key: no | Delay elapsed, not vetoed, execution succeeds. |
+
+
+6. Reason Codes
+
+
+| Code | UI message |
+| --- | --- |
+| TX_LIMIT_EXCEEDED | Blocked: amount exceeds per-transaction limit. |
+| DAILY_LIMIT_EXCEEDED | Blocked: daily allowance exhausted. |
+| RECIPIENT_NOT_ALLOWED | Blocked: destination is not approved. |
+| TARGET_NOT_ALLOWED | Blocked: contract or function is not approved. |
+| AGENT_EXPIRED | Blocked: agent permission expired. |
+| AGENT_FROZEN | Blocked: agent access is frozen. |
+| AGENT_REVOKED | Blocked: agent key was revoked. |
+| RECOVERY_DELAY_ACTIVE | Recovery pending: delay has not elapsed. |
+| RECOVERY_VETOED | Recovery cancelled by owner. |
+| SPONSOR_QUOTA_EXCEEDED | Gas sponsorship unavailable: quota exhausted. |
+
+
+7. Threat Model
+
+
+| Threat | Defence | Residual risk |
+| --- | --- | --- |
+| Agent key compromise | Caps, allowlists, expiry, freeze/revoke | Policy bug may still expose funds. |
+| Prompt injection | Wallet-level restrictions | Do not rely only on model prompts. |
+| Replay/duplicate operation | Nonce and chain-aware validation | Implementation-specific correctness. |
+| Malicious contract call | Target/function allowlist | Proxy upgrades and call semantics. |
+| Detector compromise | Bound detector to freeze authority | Secure detector-to-contract authorization needed. |
+| Guardian collusion/unavailability | 3-of-5 threshold, delay, owner veto | Guardian trust and rotation policy. |
+| Sponsor spam | Quota and paymaster validation | Paymaster integration risk. |
+| Dashboard compromise | Contract enforces policy; privileged writes need owner auth | Owner phishing/key compromise remains. |
+
+
+8. Demo Script
+
+
+| Scene | Action | Expected result |
+| --- | --- | --- |
+| 1 Safe purchase | 0.05 ETH to allowed target; cap 0.1 ETH | Allowed; activity event shown. |
+| 2 Overspend | 0.5 ETH request | Blocked; protected balance unchanged. |
+| 3 Unknown target | Call unapproved contract/function | Rejected or explicitly implemented approval path. |
+| 4 Suspicious burst | Repeated invalid requests cross threshold | Frozen; subsequent agent operations fail. |
+| 5 Recovery | Three guardian approvals | 48-hour delay shown; veto/execute tested. |
+| 6 Gas quota | Request after quota exhausted | Sponsor rejects. |
+| 7 Fuzz tests | Run Foundry test suite | Show actual output, not fabricated results. |
+
+
+9. Visual Direction
+
+Navy/white base; cyan/blue for normal states; purple for recovery; red for warnings.
+
+Use three headline verbs: DETECT → FREEZE → RECOVER.
+
+Status badges: ACTIVE, FROZEN, REVOKED, EXPIRED, RECOVERY PENDING.
+
+Show amount, destination, policy result and reason together.
+
+Confirm privileged actions; show real chain state separately from mock data.
+
+10. Design Decisions to Finalize
+
+Temporary freeze vs terminal revoke: proposed separate states.
+
+Whether owner approval can override any policy rule: hard caps should not be silently bypassed.
+
+Who can initiate recovery and how guardians are rotated.
+
+When the delay starts and how long the owner veto remains available.
+
+How new agent keys are provisioned after recovery.

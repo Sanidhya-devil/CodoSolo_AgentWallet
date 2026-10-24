@@ -1,0 +1,30 @@
+{
+  "name": "agentvault-contracts",
+  "version": "1.0.0",
+  "description": "ERC-4337 Smart Account with Policy Engine, Auto-Freeze, and Guardian Recovery for AI Agents",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "test:coverage": "hardhat coverage",
+    "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
+    "node": "hardhat node"
+  },
+  "keywords": [
+    "erc4337",
+    "account-abstraction",
+    "ai-agent",
+    "security",
+    "policy-engine"
+  ],
+  "author": "CodoSolo / Sanidhya Gupta",
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@openzeppelin/contracts": "^5.0.2",
+    "hardhat": "^2.22.10",
+    "typescript": "^5.5.4"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.9"
+  }
+}

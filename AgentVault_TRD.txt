@@ -1,0 +1,154 @@
+Technical Requirements Document (TRD)
+
+Phase 1 + Phase 2 — Proposed implementation architecture and verification
+
+AgentVault | W3-02 | CodoSolo | Sanidhya Gupta
+
+Status: Proposed specification; not a claim that features are already implemented or audited.
+
+1. Technical Summary
+
+The system combines an ERC-4337-compatible smart account, policy engine, restricted AI-agent client, owner dashboard, optional anomaly service, guardian recovery mechanism, and optional gas sponsorship quota. Spending rules, freeze state, recovery threshold/delay and sponsor limits must be enforced at the contract/authorization boundary—not only by a UI or Python service.
+
+2. Architecture
+
+This is the target architecture, not proof of implementation. Pin the smart-account library, EntryPoint, bundler, paymaster and network addresses before integration.
+
+3. Proposed Stack
+
+
+| Layer | Technology | Purpose |
+| --- | --- | --- |
+| Contracts | Solidity | Policy, agent status, recovery, quotas and events. |
+| Development/testing | Foundry | Unit, fuzz, invariant tests and local deployment. |
+| Account abstraction | ERC-4337-compatible smart account | UserOperation validation and EntryPoint flow. |
+| Agent | Python | Transaction intent and reproducible benign/rogue scenarios. |
+| Dashboard | Next.js/React + TypeScript | Policy, activity, approvals, freeze and recovery. |
+| Wallet interaction | viem and/or wagmi | Contract interaction from frontend. |
+| Detection | Rule-based Python service or bounded counters | Flag unusual rates and trigger authorized freeze. |
+| Storage | On-chain state/events; optional SQLite index | On-chain source of truth; local index is rebuildable. |
+| Environment | Local chain first; Sepolia if compatible | Test assets only; no real funds. |
+
+
+4. Contract Modules
+
+4.1 Policy engine
+
+Policy fields: perTxCap, dailyCap, spentInWindow, windowStart/windowId, allowedRecipients, allowedTargets, allowedSelectors, agentKey, expiry, status.
+
+Validation order: active status, expiry, signature/nonce, chain and EntryPoint context, target/selector, recipient, per-tx cap, daily cap; update accounting atomically.
+
+Specify deterministic daily reset semantics and use the selected account’s ERC-4337 validation interface.
+
+Never rely on a frontend check before transaction submission.
+
+4.2 Freeze and revocation
+
+States: ACTIVE, FROZEN, REVOKED, EXPIRED; define transitions explicitly.
+
+Only owner or a narrowly authorized freeze mechanism can change state.
+
+FROZEN blocks new agent-authorized operations; REVOKED is terminal for that key unless owner provisions a new key.
+
+Emit events for policy changes, freeze, revoke and status changes.
+
+4.3 Guardian recovery
+
+Store five guardian identities or an equivalent bounded guardian set.
+
+Require three distinct approvals; duplicate approvals never count twice.
+
+Start 48-hour delay only after the required threshold is reached (proposed).
+
+Owner veto invalidates pending recovery within the specified veto window.
+
+Recovery rotates/revokes agent authority or restores owner control without bypassing authorization.
+
+4.4 Gas quota
+
+Use a compatible paymaster/sponsor only if supported by selected stack.
+
+Track per-agent quota by a defined window; consider maximum cost and request count.
+
+Reject sponsorship for frozen/revoked agents, invalid operations or exhausted quota.
+
+Keep sponsorship modular so core wallet tests run without a live paymaster.
+
+5. Transaction Flow
+
+Owner configures smart account and policy.
+
+Agent creates intent and signs with restricted key.
+
+Client creates UserOperation and submits to compatible bundler.
+
+Account validation checks signature, nonce, chain/EntryPoint context, status, expiry, target, selector, recipient and limits.
+
+Valid operation proceeds; invalid operation is rejected. Owner-approval exceptions must be implemented explicitly.
+
+Suspicious activity triggers only a bounded authorized freeze path.
+
+Recovery follows 3-of-5, 48-hour delay, owner veto and scoped execution.
+
+Paymaster independently validates sponsorship quota.
+
+6. Illustrative Interfaces
+
+
+| Operation | Purpose | Access rule |
+| --- | --- | --- |
+| setPolicy(policy) | Set caps and allowlists | Owner only. |
+| setAgentKey(key, expiry) | Provision restricted key | Owner only; no owner privilege. |
+| freezeAgent(reason) | Stop agent operations | Owner or bounded authorized detector. |
+| revokeAgent() | Disable agent key | Owner/governed recovery path. |
+| requestRecovery(target) | Start recovery | Initiator rule must be specified. |
+| approveRecovery(id) | Guardian approval | Guardian only; distinct approval. |
+| vetoRecovery(id) | Cancel recovery | Owner only within veto window. |
+| executeRecovery(id) | Finish recovery | Threshold + delay + not vetoed. |
+| validateSponsorOp(...) | Check sponsor quota | Only if paymaster module exists. |
+
+
+These are conceptual interfaces, not finalized Solidity signatures. Exact interfaces depend on the chosen account and EntryPoint versions.
+
+7. Core Invariant
+
+Funds move only through valid owner authorization, an in-policy agent operation, or valid recovery. Tests must assert balances and state deltas, not only that a call reverted.
+
+8. Test Matrix
+
+
+| Test area | Cases |
+| --- | --- |
+| Policy | Below/at/above caps; recipient/target/selector allowlists; daily-window boundary. |
+| Lifecycle | Active, expired, frozen, revoked agent. |
+| Replay/signature | Invalid signature, reused nonce, wrong chain/context, duplicate operation. |
+| Hijack | Overspend, unknown recipient, malicious target, repeated attempts, expired key, daily-cap bypass. |
+| Detection | Threshold crossing freezes; benign scenario does not false-freeze under chosen rules. |
+| Recovery | 2/5 fails, 3/5 starts delay, duplicate guardian ignored, early execution fails, veto blocks, successful rotation. |
+| Gas quota | Within quota succeeds; exhausted quota fails; frozen agent not sponsored; spam cannot drain quota. |
+| Fuzz/invariant | Generated amounts, targets, recipients and state sequences preserve invariant. |
+
+
+9. Security and Deployment
+
+Pin compiler/dependencies and commit lockfiles.
+
+Validate signatures, nonces, chain ID and EntryPoint context per selected account implementation.
+
+Avoid arbitrary external calls; enforce target/function allowlists.
+
+Protect keys; never log private keys or seed phrases.
+
+Use local chain first, then testnet only after tests; verify network addresses and chain ID.
+
+Production requires independent security review, monitoring and recovery drills.
+
+10. Metrics and Open Risks
+
+Metrics: blocked operations, detection rate, false-freeze rate, recovery events, quota usage and rejected sponsorship.
+
+Risks: EntryPoint/version mismatch; off-chain detector compromise; ambiguous daily reset; guardian collusion/unavailability; sponsorship abuse.
+
+Keep detector authority limited to freeze, not arbitrary transfers or recovery execution.
+
+Treat gas sponsorship as a modular milestone if integration threatens the core wallet MVP.
