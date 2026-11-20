@@ -1,1 +1,0 @@
-AgentVault combined Phase 1 + Phase 2 package. Includes PRD, TRD, System Design, and architecture diagram. These are proposed specifications, not proof of implementation. Use local/testnet assets only and verify ERC-4337 account, EntryPoint and bundler compatibility before coding.
