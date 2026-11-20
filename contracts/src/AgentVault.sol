@@ -6,6 +6,21 @@ import "./interfaces/IEntryPoint.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
+/// @notice EIP-3009 (USDC/tUSD8-style) signed transfer authorization interface
+interface IERC3009 {
+    function receiveWithAuthorization(
+        address from,
+        address to,
+        uint256 value,
+        uint256 validAfter,
+        uint256 validBefore,
+        bytes32 nonce,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external;
+}
+
 /**
  * @title AgentVault
  * @notice ERC-4337 compatible smart account wallet with policy-constrained AI agent authority,
@@ -47,7 +62,7 @@ contract AgentVault is IAgentVault, IAccount {
     address public owner;
     address public agentKey;
     address public authorizedDetector;
-    IEntryPoint public immutable entryPoint;
+    IEntryPoint public entryPoint;
 
     // State & Policy
     AgentStatus public agentStatus;
@@ -58,8 +73,11 @@ contract AgentVault is IAgentVault, IAccount {
     mapping(address => bool) public allowedTargets;
     mapping(address => mapping(bytes4 => bool)) public allowedSelectors;
 
-    // Token-specific per-tx caps (token address => max amount)
+    // Token-specific per-tx caps and daily caps (e.g. for tUSD8)
     mapping(address => uint256) public tokenPerTxCap;
+    mapping(address => uint256) public tokenDailyCap;
+    mapping(address => uint256) public tokenSpentInWindow;
+    mapping(address => uint256) public tokenWindowStart;
 
     // Guardians & Recovery
     address[5] public guardians;
@@ -173,6 +191,16 @@ contract AgentVault is IAgentVault, IAccount {
     function setTokenCap(address token, uint256 perTxCap) external onlyOwner {
         tokenPerTxCap[token] = perTxCap;
         emit TokenCapUpdated(token, perTxCap);
+    }
+
+    function setTokenPolicy(address token, uint256 perTxCap, uint256 dailyCap) external override onlyOwner {
+        require(perTxCap <= dailyCap, "AgentVault: token perTxCap exceeds dailyCap");
+        tokenPerTxCap[token] = perTxCap;
+        tokenDailyCap[token] = dailyCap;
+        if (tokenWindowStart[token] == 0) {
+            tokenWindowStart[token] = block.timestamp;
+        }
+        emit TokenPolicyUpdated(token, perTxCap, dailyCap);
     }
 
     function setAuthorizedDetector(address detector) external override onlyOwner {
@@ -323,6 +351,12 @@ contract AgentVault is IAgentVault, IAccount {
                 if (tokenPerTxCap[dest] > 0 && tokenAmount > tokenPerTxCap[dest]) {
                     return (false, TX_LIMIT_EXCEEDED, dest, tokenAmount);
                 }
+
+                // If a token daily cap is configured, enforce it
+                uint256 currentTokenSpend = _calculateTokenWindowSpend(dest);
+                if (tokenDailyCap[dest] > 0 && currentTokenSpend + tokenAmount > tokenDailyCap[dest]) {
+                    return (false, DAILY_LIMIT_EXCEEDED, dest, tokenAmount);
+                }
             }
 
             // Prohibit arbitrary ERC-20 approve by default to prevent allowance drains
@@ -345,6 +379,14 @@ contract AgentVault is IAgentVault, IAccount {
         return policy.spentInWindow;
     }
 
+    function _calculateTokenWindowSpend(address token) internal view returns (uint256) {
+        uint256 duration = policy.windowDuration > 0 ? policy.windowDuration : 1 days;
+        if (block.timestamp >= tokenWindowStart[token] + duration) {
+            return 0;
+        }
+        return tokenSpentInWindow[token];
+    }
+
     function _recordSpend(uint256 amount) internal {
         if (amount == 0) return;
         if (block.timestamp >= policy.windowStart + policy.windowDuration) {
@@ -353,6 +395,21 @@ contract AgentVault is IAgentVault, IAccount {
         } else {
             policy.spentInWindow += amount;
         }
+    }
+
+    function _recordTokenSpend(address token, uint256 amount) internal {
+        if (amount == 0) return;
+        uint256 duration = policy.windowDuration > 0 ? policy.windowDuration : 1 days;
+        if (block.timestamp >= tokenWindowStart[token] + duration) {
+            tokenWindowStart[token] = block.timestamp;
+            tokenSpentInWindow[token] = amount;
+        } else {
+            tokenSpentInWindow[token] += amount;
+        }
+    }
+
+    function getTokenSpentToday(address token) external view override returns (uint256) {
+        return _calculateTokenWindowSpend(token);
     }
 
     function _payPrefund(uint256 missingAccountFunds) internal {
@@ -376,6 +433,132 @@ contract AgentVault is IAgentVault, IAccount {
             }
         }
         emit TransactionExecuted(dest, value, func);
+    }
+
+    /// @notice Direct execution path for agentKey or owner on Aevum testnet (bypasses bundler dependency while preserving all policy and freeze guardrails)
+    function executeByAgent(
+        address dest,
+        uint256 value,
+        bytes calldata func
+    ) external override returns (bytes memory) {
+        require(msg.sender == agentKey || msg.sender == owner, "AgentVault: caller not agentKey or owner");
+
+        if (agentStatus == AgentStatus.RECOVERY_PENDING) {
+            emit TransactionBlocked(RECOVERY_PENDING, dest, value);
+            revert("AgentVault: RECOVERY_PENDING");
+        }
+        if (agentStatus == AgentStatus.FROZEN) {
+            emit TransactionBlocked(AGENT_FROZEN, dest, value);
+            revert("AgentVault: AGENT_FROZEN");
+        }
+        if (agentStatus == AgentStatus.REVOKED) {
+            emit TransactionBlocked(AGENT_REVOKED, dest, value);
+            revert("AgentVault: AGENT_REVOKED");
+        }
+        if (block.timestamp > policy.agentExpiry && policy.agentExpiry != 0) {
+            emit TransactionBlocked(AGENT_EXPIRED, dest, value);
+            revert("AgentVault: AGENT_EXPIRED");
+        }
+
+        // Validate value (native/ETH) policy
+        if (value > 0) {
+            require(address(this).balance >= value, "AgentVault: insufficient balance");
+            if (policy.perTxCap > 0 && value > policy.perTxCap) {
+                emit TransactionBlocked(TX_LIMIT_EXCEEDED, dest, value);
+                revert("AgentVault: TX_LIMIT_EXCEEDED");
+            }
+            uint256 currentSpend = _calculateCurrentWindowSpend();
+            if (policy.dailyCap > 0 && currentSpend + value > policy.dailyCap) {
+                emit TransactionBlocked(DAILY_LIMIT_EXCEEDED, dest, value);
+                revert("AgentVault: DAILY_LIMIT_EXCEEDED");
+            }
+        }
+
+        // Validate destination
+        if (func.length == 0) {
+            if (!allowedRecipients[dest]) {
+                emit TransactionBlocked(RECIPIENT_NOT_ALLOWED, dest, value);
+                revert("AgentVault: RECIPIENT_NOT_ALLOWED");
+            }
+            if (value > 0) _recordSpend(value);
+            (bool ok, bytes memory res) = dest.call{value: value}("");
+            require(ok, "AgentVault: transfer failed");
+            emit TransactionExecuted(dest, value, func);
+            return res;
+        }
+
+        if (!allowedTargets[dest]) {
+            emit TransactionBlocked(TARGET_NOT_ALLOWED, dest, value);
+            revert("AgentVault: TARGET_NOT_ALLOWED");
+        }
+
+        bytes4 innerSelector = bytes4(func[:4]);
+        if (!allowedSelectors[dest][innerSelector]) {
+            emit TransactionBlocked(TARGET_NOT_ALLOWED, dest, value);
+            revert("AgentVault: SELECTOR_NOT_ALLOWED");
+        }
+
+        // Token inspection for ERC20_TRANSFER
+        if (innerSelector == ERC20_TRANSFER && func.length >= 68) {
+            (address tokenRecipient, uint256 tokenAmount) = abi.decode(func[4:], (address, uint256));
+
+            if (!allowedRecipients[tokenRecipient]) {
+                emit TransactionBlocked(RECIPIENT_NOT_ALLOWED, tokenRecipient, tokenAmount);
+                revert("AgentVault: RECIPIENT_NOT_ALLOWED");
+            }
+
+            if (tokenPerTxCap[dest] > 0 && tokenAmount > tokenPerTxCap[dest]) {
+                emit TransactionBlocked(TX_LIMIT_EXCEEDED, dest, tokenAmount);
+                revert("AgentVault: TOKEN_TX_LIMIT_EXCEEDED");
+            }
+
+            uint256 currentTokenSpend = _calculateTokenWindowSpend(dest);
+            if (tokenDailyCap[dest] > 0 && currentTokenSpend + tokenAmount > tokenDailyCap[dest]) {
+                emit TransactionBlocked(DAILY_LIMIT_EXCEEDED, dest, tokenAmount);
+                revert("AgentVault: TOKEN_DAILY_LIMIT_EXCEEDED");
+            }
+
+            _recordTokenSpend(dest, tokenAmount);
+        }
+
+        if (value > 0) {
+            _recordSpend(value);
+        }
+
+        (bool success, bytes memory result) = dest.call{value: value}(func);
+        if (!success) {
+            assembly {
+                revert(add(result, 32), mload(result))
+            }
+        }
+        emit TransactionExecuted(dest, value, func);
+        return result;
+    }
+
+    /// @notice Gasless top-up via EIP-3009 (tUSD8 on Aevum testnet)
+    function depositWithAuthorization(
+        address token,
+        address from,
+        uint256 amount,
+        uint256 validAfter,
+        uint256 validBefore,
+        bytes32 nonce,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external {
+        IERC3009(token).receiveWithAuthorization(
+            from,
+            address(this),
+            amount,
+            validAfter,
+            validBefore,
+            nonce,
+            v,
+            r,
+            s
+        );
+        emit VaultDeposited(token, from, amount);
     }
 
     // P0 FIX: Cryptographic single-use Owner Exception Approval Path

@@ -14,7 +14,7 @@ const config: HardhatUserConfig = {
         enabled: true,
         runs: 200,
       },
-      evmVersion: "cancun",
+      evmVersion: "shanghai",
     },
   },
   paths: {
@@ -26,10 +26,21 @@ const config: HardhatUserConfig = {
   networks: {
     hardhat: {
       chainId: 31337,
+      hardfork: "shanghai",
     },
     localhost: {
       url: "http://127.0.0.1:8545",
       chainId: 31337,
+    },
+    aevumTestnet: {
+      url: "https://rpc-test.qday.info",
+      chainId: 44005,
+      accounts: accounts.length > 0 ? accounts : undefined,
+    },
+    aevumFork: {
+      url: "http://127.0.0.1:8555",
+      chainId: 440050,
+      accounts: accounts.length > 0 ? accounts : undefined,
     },
     sepolia: {
       url: process.env.SEPOLIA_RPC_URL || "https://rpc.sepolia.org",

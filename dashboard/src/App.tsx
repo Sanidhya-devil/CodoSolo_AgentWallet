@@ -97,7 +97,53 @@ const AGENT_VAULT_ABI = [
 const VAULT_ADDRESS = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512";
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'cockpit' | 'policy' | 'simulator' | 'activity' | 'recovery' | 'terminal'>('cockpit');
+  const [activeTab, setActiveTab] = useState<'cockpit' | 'policy' | 'simulator' | 'agents' | 'activity' | 'recovery' | 'terminal'>('cockpit');
+
+  // ERC-8004 Trustless Agents State
+  const [registeredAgents, setRegisteredAgents] = useState([
+    {
+      id: 1,
+      name: "InferenceOracle Agent",
+      owner: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      uri: "ipfs://bafkreidv7kqlzkpq91v2n6la2b8004agentcard01",
+      endpoint: "https://oracle.aevum-agents.io/mcp",
+      tools: ["market_predict", "sentiment_scoring", "news_rag"],
+      priceTusd8: 1.50,
+      score: 98,
+      feedbackCount: 142,
+      active: true,
+      lastActive: "1 min ago",
+    },
+    {
+      id: 2,
+      name: "CodeAuditor Pro Agent",
+      owner: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+      uri: "ipfs://bafkreic7x6hzkpq91v2n6la2b8004agentcard02",
+      endpoint: "https://audit.aevum-agents.io/mcp",
+      tools: ["slither_ast", "invariant_fuzz", "shanghai_check"],
+      priceTusd8: 3.00,
+      score: 95,
+      feedbackCount: 88,
+      active: true,
+      lastActive: "12 mins ago",
+    },
+    {
+      id: 3,
+      name: "HighRisk Arbitrage Bot",
+      owner: "0x90F79bf6EB2c4f870365E785982E1f101E93b906",
+      uri: "ipfs://bafkreib6ykhzkpq91v2n6la2b8004agentcard03",
+      endpoint: "https://arbitrage.unverified-agents.xyz",
+      tools: ["flashloan_drain", "mempool_snipe"],
+      priceTusd8: 25.00,
+      score: 34,
+      feedbackCount: 19,
+      active: false,
+      lastActive: "Suspended (Disputed)",
+    },
+  ]);
+  const [newAgentName, setNewAgentName] = useState('');
+  const [newAgentUri, setNewAgentUri] = useState('');
+  const [newAgentPrice, setNewAgentPrice] = useState('1.50');
 
   // Auth & Database State
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
@@ -113,19 +159,19 @@ export default function App() {
   // Web3 Wallet State
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [walletBalance, setWalletBalance] = useState<string>('0.00');
-  const [chainId, setChainId] = useState<number | null>(31337);
-  const [networkName, setNetworkName] = useState<string>('Localnet (31337)');
+  const [chainId, setChainId] = useState<number | null>(44005);
+  const [networkName, setNetworkName] = useState<string>('QDay Aevum Testnet (44005)');
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
   const [txPending, setTxPending] = useState<boolean>(false);
   const [txStatusMsg, setTxStatusMsg] = useState<string | null>(null);
 
-  // Vault State
+  // Vault State (tUSD8 Native Stablecoin on Aevum Testnet)
   const [status, setStatus] = useState<'ACTIVE' | 'FROZEN' | 'REVOKED' | 'EXPIRED' | 'RECOVERY_PENDING'>('ACTIVE');
   const [freezeReason, setFreezeReason] = useState<string>('');
-  const [perTxCap, setPerTxCap] = useState<number>(0.1);
-  const [dailyCap, setDailyCap] = useState<number>(0.3);
-  const [spentToday, setSpentToday] = useState<number>(0.05);
-  const [vaultBalance, setVaultBalance] = useState<number>(5.0);
+  const [perTxCap, setPerTxCap] = useState<number>(5.0);
+  const [dailyCap, setDailyCap] = useState<number>(10.0);
+  const [spentToday, setSpentToday] = useState<number>(1.50);
+  const [vaultBalance, setVaultBalance] = useState<number>(1000.0);
   const [expiryDays, setExpiryDays] = useState<number>(7);
   const [copiedText, setCopiedText] = useState<string | null>(null);
 
@@ -470,7 +516,9 @@ export default function App() {
       setWalletBalance(parseFloat(ethers.formatEther(balanceWei)).toFixed(4));
 
       const id = Number(network.chainId);
-      if (id === 11155111) setNetworkName('Ethereum Sepolia (11155111)');
+      if (id === 44005) setNetworkName('QDay Aevum Testnet (44005)');
+      else if (id === 440050) setNetworkName('Aevum Anvil Fork (440050)');
+      else if (id === 11155111) setNetworkName('Ethereum Sepolia (11155111)');
       else if (id === 84532) setNetworkName('Base Sepolia (84532)');
       else if (id === 31337) setNetworkName('Localnet (31337)');
       else setNetworkName(`Chain ID: ${id}`);
@@ -480,6 +528,35 @@ export default function App() {
       addLog('WARN', `[WALLET] Connection request cancelled.`);
     } finally {
       setIsConnecting(false);
+    }
+  };
+
+  const switchToAevum = async () => {
+    if (typeof window === 'undefined' || !(window as any).ethereum) return;
+    try {
+      await (window as any).ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: '0xABE5' }],
+      });
+    } catch (switchError: any) {
+      if (switchError.code === 4902) {
+        try {
+          await (window as any).ethereum.request({
+            method: 'wallet_addEthereumChain',
+            params: [
+              {
+                chainId: '0xABE5',
+                chainName: 'QDay Aevum Testnet',
+                nativeCurrency: { name: 'tQDAY', symbol: 'tQDAY', decimals: 18 },
+                rpcUrls: ['https://rpc-test.qday.info'],
+                blockExplorerUrls: ['https://explorer-test.qday.info'],
+              },
+            ],
+          });
+        } catch (addError) {
+          console.error(addError);
+        }
+      }
     }
   };
 
@@ -890,7 +967,7 @@ export default function App() {
                   AGENT<span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500">VAULT</span>
                 </span>
               </div>
-              <span className="text-[10px] font-mono text-cyan-400/80 block">ERC-4337 · Cancun EVM</span>
+              <span className="text-[10px] font-mono text-cyan-400/80 block">ERC-8004 · Shanghai EVM · tUSD8</span>
             </div>
           </div>
 
@@ -911,8 +988,8 @@ export default function App() {
               </span>
             </div>
             <div className="flex justify-between text-[10px] text-slate-400">
-              <span>Network: Localnet</span>
-              <span className="text-cyan-400">#31337</span>
+              <span>Network: QDay Aevum</span>
+              <span className="text-cyan-400">#44005</span>
             </div>
             <div className="text-[9px] text-slate-400 truncate">
               Vault: <span className="text-slate-300">0xe7f1...0512</span>
@@ -926,6 +1003,7 @@ export default function App() {
               { key: 'cockpit', label: 'Telemetry Cockpit', icon: Activity },
               { key: 'policy', label: 'Policy Matrix', icon: Sliders },
               { key: 'simulator', label: 'Attack Simulator', icon: Play },
+              { key: 'agents', label: 'ERC-8004 Agents', icon: Cpu },
               { key: 'activity', label: 'Activity Feed', icon: Database },
               { key: 'recovery', label: 'Guardian Recovery', icon: Users },
               { key: 'terminal', label: 'EVM Trace Terminal', icon: Terminal },
@@ -984,15 +1062,15 @@ export default function App() {
 
       {/* Main Content Area (offset by sidebar width) */}
       <div className="flex-1 flex flex-col ml-64 min-w-0">
-        {/* P2 Issue 25 FIX: Prominent Local Demo Banner */}
-        <div className="relative z-20 bg-amber-500/15 border-b border-amber-500/40 px-8 py-1.5 flex items-center justify-between text-[11px] font-mono text-amber-300">
+        {/* QDay Aevum Testnet Banner */}
+        <div className="relative z-20 bg-cyan-950/40 border-b border-cyan-500/30 px-8 py-1.5 flex items-center justify-between text-[11px] font-mono text-cyan-300">
           <div className="flex items-center gap-2 font-bold tracking-wide">
-            <AlertTriangle size={14} className="text-amber-400" />
-            <span>LOCAL DEMO / TESTNET ENVIRONMENT — NO REAL ASSETS AT RISK</span>
+            <ShieldCheck size={14} className="text-cyan-400" />
+            <span>QDAY AEVUM TESTNET (#44005) — SHANGHAI EVM & tUSD8 STABLECOIN COMMERCE</span>
           </div>
           <div className="flex items-center gap-4 text-slate-400">
-            <span>Active Chain: <strong className="text-amber-300">{networkName}</strong></span>
-            <span>EntryPoint: <strong className="text-slate-300">0x5FbDB...80aa3</strong></span>
+            <span>Active Chain: <strong className="text-cyan-300">{networkName}</strong></span>
+            <span>tUSD8 Contract: <strong className="text-slate-300">0x4565...3483</strong></span>
           </div>
         </div>
 
@@ -1034,6 +1112,16 @@ export default function App() {
               <Ban size={14} className="text-rose-400" /> Revoke
             </button>
 
+            {/* Switch to Aevum Button */}
+            {chainId !== 44005 && (
+              <button
+                onClick={switchToAevum}
+                className="px-3 py-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition flex items-center gap-1.5 shadow-lg shadow-cyan-950/40"
+              >
+                <Globe size={14} /> Switch to Aevum
+              </button>
+            )}
+
             {/* Wallet Button */}
             {walletAddress ? (
               <div className="flex items-center gap-2 bg-[#0c1630] border border-cyan-500/30 rounded-xl px-3.5 py-1.5 font-mono text-xs">
@@ -1065,7 +1153,7 @@ export default function App() {
             <div className="rounded-2xl glass-panel p-4 shadow-xl space-y-1">
               <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider block">Vault Reserve</span>
               <div className="text-2xl font-black text-white mt-1">
-                {vaultBalance.toFixed(2)} <span className="text-xs font-mono text-cyan-400">ETH</span>
+                ${vaultBalance.toFixed(2)} <span className="text-xs font-mono text-cyan-400">tUSD8</span>
               </div>
               <span className="text-[10px] text-emerald-400 block font-mono">● Protected On-Chain</span>
             </div>
@@ -1076,10 +1164,10 @@ export default function App() {
                 <span className="text-xs font-mono font-bold text-cyan-400">{((spentToday / dailyCap) * 100).toFixed(0)}%</span>
               </div>
               <div className="text-2xl font-black text-white mt-1">
-                {spentToday.toFixed(2)} <span className="text-xs font-mono text-slate-400">/ {dailyCap.toFixed(2)} ETH</span>
+                ${spentToday.toFixed(2)} <span className="text-xs font-mono text-slate-400">/ ${dailyCap.toFixed(2)} tUSD8</span>
               </div>
               <div className="flex justify-between text-[10px] text-slate-400 font-mono">
-                <span>Rem: <strong className="text-cyan-300">{(dailyCap - spentToday).toFixed(2)} ETH</strong></span>
+                <span>Rem: <strong className="text-cyan-300">${(dailyCap - spentToday).toFixed(2)} tUSD8</strong></span>
                 <span>Window: 24h</span>
               </div>
             </div>
@@ -1087,9 +1175,9 @@ export default function App() {
             <div className="rounded-2xl glass-panel p-4 shadow-xl space-y-1">
               <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider block">Per-Tx Ceiling</span>
               <div className="text-2xl font-black text-white mt-1">
-                {perTxCap.toFixed(2)} <span className="text-xs font-mono text-slate-400">ETH</span>
+                ${perTxCap.toFixed(2)} <span className="text-xs font-mono text-slate-400">tUSD8</span>
               </div>
-              <span className="text-[10px] text-slate-400 block font-mono">Token Cap: 100 MTK</span>
+              <span className="text-[10px] text-slate-400 block font-mono">Gas: 2.50 tQDAY</span>
             </div>
 
             {/* Issue 18: Gas Sponsorship Quota */}
@@ -1697,6 +1785,179 @@ export default function App() {
           </div>
         )}
 
+        {/* ERC-8004 TRUSTLESS AGENTS REGISTRY TAB */}
+        {activeTab === 'agents' && (
+          <div className="space-y-6">
+            <div className="rounded-2xl glass-panel-elevated p-6 space-y-4">
+              <div className="flex flex-wrap justify-between items-center gap-4">
+                <div>
+                  <h3 className="text-base font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                    <Cpu className="text-cyan-400" size={18} /> ERC-8004 Trustless Agents Registry
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    On-chain verifiable AI agent identities and reputation scoring for QDay Aevum Testnet.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono px-3 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-300">
+                    Standard: ERC-8004 v1.0
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-cyan-950/30 border border-cyan-500/30 font-mono text-xs text-cyan-200 flex items-center gap-3">
+                <ShieldCheck size={20} className="text-cyan-400 shrink-0" />
+                <div className="text-[11px] leading-relaxed">
+                  <span className="font-bold text-white">ERC-8004 Standard Compliant:</span> Agents are assigned unique on-chain ERC-721 AgentCards linked to <code className="text-cyan-300">registration-v1</code> JSON schemas, detailing MCP tools, model endpoints, and verifiable reputation metrics.
+                </div>
+              </div>
+
+              {/* Agent Cards Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5 pt-2">
+                {registeredAgents.map((agent) => (
+                  <div key={agent.id} className="p-5 rounded-xl bg-[#030712] border border-slate-800 space-y-4 hover:border-cyan-500/40 transition">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-cyan-400 font-mono">Agent #{agent.id}</span>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${agent.active ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'}`}>
+                            {agent.active ? 'VERIFIED' : 'SUSPENDED'}
+                          </span>
+                        </div>
+                        <h4 className="text-sm font-bold text-white mt-1">{agent.name}</h4>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[10px] font-mono text-slate-500 block">Trust Score</span>
+                        <span className={`text-base font-black font-mono ${agent.score >= 80 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {agent.score}/100
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 text-xs font-mono">
+                      <div className="bg-[#070d1e] p-2.5 rounded-lg border border-slate-800/80">
+                        <span className="text-[10px] text-slate-500 block">MCP Endpoint</span>
+                        <span className="text-slate-300 truncate block text-[11px] mt-0.5">{agent.endpoint}</span>
+                      </div>
+
+                      <div className="bg-[#070d1e] p-2.5 rounded-lg border border-slate-800/80">
+                        <span className="text-[10px] text-slate-500 block">AgentCard Metadata (IPFS)</span>
+                        <span className="text-cyan-400/90 truncate block text-[11px] mt-0.5">{agent.uri}</span>
+                      </div>
+
+                      <div>
+                        <span className="text-[10px] text-slate-500 block mb-1">Declared MCP Tools</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {agent.tools.map((t) => (
+                            <span key={t} className="px-2 py-0.5 rounded bg-slate-800/60 border border-slate-700/60 text-slate-300 text-[10px]">
+                              {t}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs font-mono">
+                      <span className="text-slate-400">Rate: <strong className="text-white">${agent.priceTusd8.toFixed(2)} tUSD8</strong>/call</span>
+                      <span className="text-slate-500 text-[10px]">{agent.feedbackCount} Feedbacks</span>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        if (!agent.active) {
+                          addLog('WARN', `[PAYMENT REJECTED] Agent #${agent.id} is suspended in ERC-8004 Reputation Registry.`);
+                          return;
+                        }
+                        if (spentToday + agent.priceTusd8 > dailyCap) {
+                          addLog('WARN', `[POLICY BLOCKED] Payment of $${agent.priceTusd8} tUSD8 would exceed daily cap of $${dailyCap} tUSD8.`);
+                          return;
+                        }
+                        setSpentToday((prev) => prev + agent.priceTusd8);
+                        setVaultBalance((prev) => prev - agent.priceTusd8);
+                        addLog('SUCCESS', `[tUSD8 PAYMENT EXECUTED] Paid $${agent.priceTusd8.toFixed(2)} tUSD8 to Agent #${agent.id} (${agent.name}) via AgentVault.`);
+                      }}
+                      disabled={!agent.active}
+                      className="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 disabled:opacity-40 disabled:hover:from-cyan-600 text-white font-bold text-xs uppercase tracking-wider transition flex items-center justify-center gap-1.5"
+                    >
+                      <Coins size={14} /> Pay ${agent.priceTusd8.toFixed(2)} tUSD8
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Register New Agent Form */}
+              <div className="mt-6 p-5 rounded-xl bg-[#070d1e] border border-slate-800 space-y-4">
+                <h4 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <Plus size={16} className="text-cyan-400" /> Register New ERC-8004 Agent
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 font-mono text-xs">
+                  <div>
+                    <label className="text-slate-400 block mb-1">Agent Name</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. DataScraper Agent"
+                      value={newAgentName}
+                      onChange={(e) => setNewAgentName(e.target.value)}
+                      className="w-full px-3 py-2 bg-[#030712] border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-slate-400 block mb-1">AgentCard IPFS URI</label>
+                    <input
+                      type="text"
+                      placeholder="ipfs://bafkrei..."
+                      value={newAgentUri}
+                      onChange={(e) => setNewAgentUri(e.target.value)}
+                      className="w-full px-3 py-2 bg-[#030712] border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-slate-400 block mb-1">Cost (tUSD8)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        step="0.1"
+                        placeholder="1.50"
+                        value={newAgentPrice}
+                        onChange={(e) => setNewAgentPrice(e.target.value)}
+                        className="w-full px-3 py-2 bg-[#030712] border border-slate-700 rounded-lg text-white focus:outline-none focus:border-cyan-500"
+                      />
+                      <button
+                        onClick={() => {
+                          if (!newAgentName) return;
+                          const newId = registeredAgents.length + 1;
+                          setRegisteredAgents([
+                            ...registeredAgents,
+                            {
+                              id: newId,
+                              name: newAgentName,
+                              owner: walletAddress || "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+                              uri: newAgentUri || `ipfs://bafkreic7x6hzkpq91v2n6la2b8004agentcard0${newId}`,
+                              endpoint: `https://${newAgentName.toLowerCase().replace(/[^a-z0-9]/g, '')}.aevum.io/mcp`,
+                              tools: ["custom_task", "data_parse"],
+                              priceTusd8: parseFloat(newAgentPrice) || 1.50,
+                              score: 90,
+                              feedbackCount: 1,
+                              active: true,
+                              lastActive: "Just now",
+                            },
+                          ]);
+                          addLog('SUCCESS', `[ERC-8004 REGISTERED] AgentCard minted for #${newId} (${newAgentName})`);
+                          setNewAgentName('');
+                          setNewAgentUri('');
+                        }}
+                        className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-bold uppercase transition"
+                      >
+                        Register
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* SQLITE ACTIVITY FEED TAB (Issue 15 & 16) */}
         {activeTab === 'activity' && (
           <div className="rounded-2xl glass-panel-elevated p-6 space-y-4">
@@ -1960,7 +2221,7 @@ export default function App() {
             <div className="flex flex-wrap justify-between items-center pb-3 border-b border-slate-800 gap-3">
               <div className="flex items-center gap-2">
                 <Terminal size={14} className="text-cyan-400" />
-                <span className="text-slate-300 font-bold">Hardhat Cancun EVM Execution Trace</span>
+                <span className="text-slate-300 font-bold">QDay Aevum (Shanghai EVM) Execution Trace</span>
                 <span className="text-[10px] text-slate-500">({logs.length} events logged)</span>
               </div>
 

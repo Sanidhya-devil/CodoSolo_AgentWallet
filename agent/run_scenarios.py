@@ -80,15 +80,16 @@ def run_benchmark():
             status = "PASS (BLOCKED by Policy Engine)"
 
         elif sc_id == "SCENARIO_2_DAILY_CAP_BYPASS":
-            # 4 requests of 0.09 ETH (0.36 total > 0.3 daily cap)
+            # 4 requests of $4.00 tUSD8 ($16.00 total > $10.00 daily cap)
             daily_spent = 0.0
-            daily_cap = 0.30
+            daily_cap = 10.00
+            tusd8_amt = sc.get("amount_tusd8", 4.00)
             for i in range(sc.get("repeat_count", 4)):
-                if daily_spent + amount <= daily_cap:
-                    daily_spent += amount
+                if daily_spent + tusd8_amt <= daily_cap:
+                    daily_spent += tusd8_amt
                 else:
                     attacks_blocked += 1
-            status = f"PASS (3 allowed = {daily_spent:.2f} ETH, 4th BLOCKED with DAILY_LIMIT_EXCEEDED)"
+            status = f"PASS (2 allowed = ${daily_spent:.2f} tUSD8, 3rd & 4th BLOCKED with DAILY_LIMIT_EXCEEDED)"
 
         elif sc_id == "SCENARIO_3_UNKNOWN_RECIPIENT":
             success = False

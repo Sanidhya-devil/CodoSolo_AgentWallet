@@ -50,9 +50,12 @@ interface IAgentVault {
     event RecoveryApproved(uint256 indexed recoveryId, address indexed guardian, uint256 totalApprovals);
     event RecoveryVetoed(uint256 indexed recoveryId, address indexed owner);
     event RecoveryExecuted(uint256 indexed recoveryId, address newOwner, address newAgent);
+    event TokenPolicyUpdated(address indexed token, uint256 perTxCap, uint256 dailyCap);
+    event VaultDeposited(address indexed token, address indexed from, uint256 amount);
 
     // Core Management
     function setPolicy(uint256 perTxCap, uint256 dailyCap, uint256 windowDuration, uint256 agentExpiry) external;
+    function setTokenPolicy(address token, uint256 perTxCap, uint256 dailyCap) external;
     function setAgentKey(address _agentKey, uint256 _expiry) external;
     function setAllowedRecipient(address recipient, bool allowed) external;
     function setAllowedTarget(address target, bool allowed) external;
@@ -66,6 +69,7 @@ interface IAgentVault {
 
     // Execution
     function execute(address dest, uint256 value, bytes calldata func) external;
+    function executeByAgent(address dest, uint256 value, bytes calldata func) external returns (bytes memory);
     function executeBatch(address[] calldata dests, uint256[] calldata values, bytes[] calldata funcs) external;
 
     // Recovery
@@ -80,4 +84,5 @@ interface IAgentVault {
     function isTargetAllowed(address target) external view returns (bool);
     function isSelectorAllowed(address target, bytes4 selector) external view returns (bool);
     function getSpentToday() external view returns (uint256);
+    function getTokenSpentToday(address token) external view returns (uint256);
 }

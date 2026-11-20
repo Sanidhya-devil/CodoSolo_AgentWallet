@@ -83,12 +83,12 @@ class DetectorService:
     def _dispatch_freeze_on_chain(self, reason: str) -> str:
         """Sends freezeAgent transaction directly to AgentVault contract."""
         nonce = self.w3.eth.get_transaction_count(self.account.address)
+        gas_price = self.w3.eth.gas_price
         tx = self.vault_contract.functions.freezeAgent(reason).build_transaction({
             "from": self.account.address,
             "nonce": nonce,
             "gas": 150000,
-            "maxFeePerGas": self.w3.eth.gas_price,
-            "maxPriorityFeePerGas": self.w3.to_wei(1, "gwei"),
+            "gasPrice": gas_price,
             "chainId": self.w3.eth.chain_id,
         })
         signed = self.account.sign_transaction(tx)

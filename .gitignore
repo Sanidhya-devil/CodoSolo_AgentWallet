@@ -6,3 +6,8 @@ dist/
 .env
 *.log
 .DS_Store
+out/
+broadcast/
+cache_forge/
+__pycache__/
+*.pyc
